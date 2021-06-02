@@ -21,10 +21,29 @@ abstract class ViewStateRefreshListModel<T> extends ViewStateListModel<T> {
   Future<List<T>?> refresh({bool init = false}) async {
     try {
       _currentPageNum = pageNumFirst;
-      
-      var data = await loadData(_currentPageNum);
+      var data = await loadData(pageNum: _currentPageNum);
+      if (data.isEmpty) {
+        _refreshController.refreshCompleted(resetFooterState: true);
+        list.clear();
+        setEmpty();
+      } else {
+        onCompleted(data);
+        list.clear();
+        list.addAll(data);
+        _refreshController.refreshCompleted();
 
+        if (data.length < pageSize) {
+          // 小于分页的数量，禁止上拉加载更多
+          _refreshController.loadNoData();
+        } else {
+          // 防止上次上拉加载更多失败，需要重置状态
+          _refreshController.loadComplete();
+        }
+        setIdle();
+      }
     } catch (e) {
+      // 页面已经加载了数据,如果刷新报错,不应该直接跳转错误页面
+      // 而是显示之前的页面数据.给出错误提示
       if (init) list.clear();
       _refreshController.refreshFailed();
       setError();
@@ -32,8 +51,39 @@ abstract class ViewStateRefreshListModel<T> extends ViewStateListModel<T> {
     }
   }
 
+  /// 上拉加载更多
+  Future<List<T>?> loadMore() async {
+    try {
+      var data = await loadData(pageNum: ++_currentPageNum);
+      if (data.isEmpty) {
+        _currentPageNum--;
+        _refreshController.loadNoData();
+      } else {
+        onCompleted(data);
+        list.addAll(data);
+        if (data.length < pageSize) {
+          _refreshController.loadNoData();
+        } else {
+          _refreshController.loadComplete();
+        }
+        notifyListeners();
+      }
+      return data;
+    } catch (e) {
+      _currentPageNum--;
+      _refreshController.loadFailed();
+      return null;
+    }
+  }
+
   /// 加载数据
   ///
-  /// [pageNum] 页面
+  /// [pageNum] 页码
   Future<List<T>> loadData({int pageNum});
+
+  @override
+  void dispose() {
+    _refreshController.dispose();
+    super.dispose();
+  }
 }
